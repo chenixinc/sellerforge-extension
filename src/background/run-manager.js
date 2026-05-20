@@ -12,6 +12,9 @@ import {
 import { extractMarketplace, wait } from "../shared/utils";
 import { OrderQueue } from "./order-queue";
 
+const MIN_REVIEW_DAYS = 5;
+const MAX_REVIEW_DAYS = 30;
+
 export class RunManager {
   constructor() {
     this.queue = new OrderQueue();
@@ -42,8 +45,12 @@ export class RunManager {
   }
 
   broadcastState() {
+    const state = this.getState();
+    chrome.storage.local
+      .set({ "sellerforge-last-run-state": state })
+      .catch(() => {});
     chrome.runtime
-      .sendMessage({ type: MSG.STATE_UPDATE, payload: this.getState() })
+      .sendMessage({ type: MSG.STATE_UPDATE, payload: state })
       .catch(() => {});
   }
 
@@ -190,9 +197,30 @@ export class RunManager {
 
     const allIds = this.queue.getAllDiscoveredIds();
     const skippable = await getSkippableOrderIds(allIds);
+
+    const ageSkippable = new Set();
+    const allOrders = this.queue.getAllDiscoveredOrders();
+
+    for (const order of allOrders) {
+      if (!order.paymentComplete) {
+        continue;
+      }
+
+      await saveOrderState({
+        orderId: order.orderId,
+        detailsUrl: order.detailsUrl,
+        marketplace: extractMarketplace(order.detailsUrl),
+        ...(order.orderDate ? { orderDate: order.orderDate } : {}),
+      });
+
+      if (!isWithinReviewWindow(order.orderDate)) {
+        ageSkippable.add(order.orderId);
+      }
+    }
+
     this.state.alreadyRequestedCount = skippable.size;
 
-    this.queue.buildQueue(skippable);
+    this.queue.buildQueue(new Set([...skippable, ...ageSkippable]));
     this.state.queuedCount = this.queue.queuedCount;
     this.state.totalInQueue = this.queue.queuedCount;
     this.broadcastState();
@@ -303,8 +331,12 @@ export class RunManager {
             await this.saveResult(order, ORDER_STATUS.REQUESTED);
             return ORDER_STATUS.REQUESTED;
           }
-          await this.saveResult(order, ORDER_STATUS.REQUESTED);
-          return ORDER_STATUS.REQUESTED;
+          await this.saveResult(
+            order,
+            ORDER_STATUS.FAILED,
+            `Review request did not reach success alert after confirmation: ${successResult}`,
+          );
+          return ORDER_STATUS.FAILED;
         } else {
           await this.saveResult(
             order,
@@ -348,6 +380,10 @@ export class RunManager {
       detailsUrl: order.detailsUrl,
       marketplace: extractMarketplace(order.detailsUrl),
     };
+
+    if (order.orderDate) {
+      data.orderDate = order.orderDate;
+    }
 
     if (errorMessage) data.errorMessage = errorMessage;
     if (status === ORDER_STATUS.REQUESTED) {
@@ -441,4 +477,31 @@ export class RunManager {
       this.broadcastState();
     }
   }
+}
+
+function isWithinReviewWindow(orderDate) {
+  const ageInDays = getOrderAgeInDays(orderDate);
+  if (ageInDays == null) return false;
+  return ageInDays >= MIN_REVIEW_DAYS && ageInDays <= MAX_REVIEW_DAYS;
+}
+
+function getOrderAgeInDays(orderDate) {
+  if (!orderDate) return null;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(orderDate);
+  if (!match) return null;
+
+  const orderTime = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+  );
+  const now = new Date();
+  const todayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+
+  return Math.floor((todayUtc - orderTime) / 86400000);
 }

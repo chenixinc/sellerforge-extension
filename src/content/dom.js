@@ -1,6 +1,8 @@
 import { PAGE_TYPE } from "../shared/constants";
 
 const ORDER_ID_REGEX = /\d{3}-\d{7}-\d{7}/;
+const ORDER_DATE_REGEX = /\b\d{4}-\d{2}-\d{2}\b/;
+const PAYMENT_COMPLETE_TEXT = "Payment complete";
 
 export function detectPageType() {
   const url = window.location.href;
@@ -71,7 +73,12 @@ export function extractOrders() {
           seenIds.add(orderId);
           const detailsUrl =
             link.href || `${window.location.origin}/orders-v3/order/${orderId}`;
-          orders.push({ orderId, detailsUrl });
+          orders.push({
+            orderId,
+            detailsUrl,
+            orderDate: extractOrderDateFromRow(row),
+            paymentComplete: isPaymentCompleteRow(row),
+          });
         }
         break;
       }
@@ -79,6 +86,28 @@ export function extractOrders() {
   }
 
   return orders;
+}
+
+function extractOrderDateFromRow(row) {
+  const cells = row.querySelectorAll("td");
+
+  for (const cell of cells) {
+    const text = (cell.innerText || cell.textContent || "").trim();
+    const match = text.match(ORDER_DATE_REGEX);
+    if (match) return match[0];
+  }
+
+  return null;
+}
+
+function isPaymentCompleteRow(row) {
+  const statusEl = row.querySelector(".main-status");
+  const statusText = (
+    statusEl?.innerText ||
+    statusEl?.textContent ||
+    ""
+  ).trim();
+  return statusText === PAYMENT_COMPLETE_TEXT;
 }
 
 export function goToNextPage() {

@@ -46,6 +46,10 @@ export class OrderQueue {
     return Array.from(this.discovered.keys());
   }
 
+  getAllDiscoveredOrders() {
+    return Array.from(this.discovered.values());
+  }
+
   get discoveredCount() {
     return this.discovered.size;
   }

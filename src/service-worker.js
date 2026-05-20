@@ -173,6 +173,21 @@ async function getAsinData(asin) {
   return { product, suppliers };
 }
 
+function hasRunData(state) {
+  return Boolean(
+    state &&
+    (state.discoveredCount ||
+      state.queuedCount ||
+      state.processedCount ||
+      state.requestedCount ||
+      state.alreadyRequestedCount ||
+      state.tooEarlyCount ||
+      state.failedCount ||
+      state.status === "completed" ||
+      state.status === "stopped"),
+  );
+}
+
 // Single RunManager instance
 const runManager = new RunManager();
 
@@ -218,8 +233,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case MSG.GET_STATE:
-      sendResponse(runManager.getState());
-      return false;
+      chrome.storage.local.get("sellerforge-last-run-state", (result) => {
+        const liveState = runManager.getState();
+        const storedState = result["sellerforge-last-run-state"] || null;
+        const shouldUseStoredState =
+          liveState.status === "idle" && storedState && hasRunData(storedState);
+
+        sendResponse(shouldUseStoredState ? storedState : liveState);
+      });
+      return true;
 
     case MSG.START_RUN:
       handleStartRun(sendResponse);

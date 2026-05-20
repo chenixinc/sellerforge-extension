@@ -172,6 +172,14 @@ export default function ReviewRequester() {
             </Typography>
           </Stack>
 
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", mb: 0.75 }}
+          >
+            {isRunning ? "Current run" : "Latest run"}
+          </Typography>
+
           {isRunning && (
             <LinearProgress
               variant={runState.totalInQueue > 0 ? "determinate" : "indeterminate"}
