@@ -165,14 +165,8 @@ export class RunManager {
     this.broadcastState();
 
     let hasMorePages = true;
-    let firstPage = true;
 
     while (hasMorePages && !this.stopRequested) {
-      if (!firstPage) {
-        await wait(TIMING.PAGINATION_WAIT_MS);
-      }
-      firstPage = false;
-
       const pageType = await this.sendToTab(MSG.DETECT_PAGE);
       if (pageType !== PAGE_TYPE.MANAGE_ORDERS) {
         this.state.error =
@@ -180,6 +174,13 @@ export class RunManager {
         this.state.status = RUN_STATUS.STOPPED;
         this.broadcastState();
         return;
+      }
+
+      const readyResult = await this.sendToTab(MSG.WAIT_FOR_ORDERS_READY, {
+        minDelayMs: 4000,
+      });
+      if (!readyResult?.ready) {
+        log("Orders page readiness timed out; proceeding anyway", readyResult);
       }
 
       const orders = await this.sendToTab(MSG.EXTRACT_ORDERS);

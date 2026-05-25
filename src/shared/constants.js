@@ -52,6 +52,7 @@ export const MSG = {
   DETECT_PAGE: "DETECT_PAGE",
   EXTRACT_ORDERS: "EXTRACT_ORDERS",
   GO_NEXT_PAGE: "GO_NEXT_PAGE",
+  WAIT_FOR_ORDERS_READY: "WAIT_FOR_ORDERS_READY",
   CLICK_REQUEST_REVIEW: "CLICK_REQUEST_REVIEW",
   DETECT_REVIEW_RESULT: "DETECT_REVIEW_RESULT",
   CLICK_CONFIRM_YES: "CLICK_CONFIRM_YES",
@@ -89,7 +90,7 @@ export const MSG = {
 };
 
 export const DEFAULT_ORDERS_URL =
-  "https://sellercentral.amazon.ca/orders-v3?date-range=last-14&sort=order_date_asc";
+  "https://sellercentral.amazon.ca/orders-v3?date-range=last-30&sort=order_date_asc";
 
 export const TIMING = {
   PAGE_LOAD_WAIT_MS: 3000,

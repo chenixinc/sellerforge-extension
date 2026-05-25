@@ -112,13 +112,47 @@ function isPaymentCompleteRow(row) {
 
 export function goToNextPage() {
   const nextButton = findNextButton();
-
-  if (nextButton && !isDisabled(nextButton)) {
-    simulateRealClick(nextButton);
-    return { navigated: true, hasNextPage: true };
+  if (!nextButton) {
+    return { navigated: false, hasNextPage: false };
   }
 
-  return { navigated: false, hasNextPage: false };
+  if (isDisabled(nextButton)) {
+    return { navigated: false, hasNextPage: false };
+  }
+
+  simulateRealClick(nextButton);
+  return { navigated: true, hasNextPage: true };
+}
+
+export async function waitForOrdersReady(options = {}) {
+  const minDelayMs = Number(options.minDelayMs) || 4000;
+  const timeoutMs = Number(options.timeoutMs) || 20000;
+  const pollMs = Number(options.pollMs) || 200;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const elapsedMs = Date.now() - startedAt;
+    const snapshot = getOrdersReadinessSnapshot();
+
+    const minDelayPassed = elapsedMs >= minDelayMs;
+    const hasPageParam = snapshot.pageParamPresent;
+    const rowsReady =
+      snapshot.expectedRowCount == null
+        ? snapshot.rowCount > 0
+        : snapshot.rowCount >= snapshot.expectedRowCount;
+
+    if (minDelayPassed && hasPageParam && rowsReady) {
+      return { ready: true, snapshot };
+    }
+
+    await waitMs(pollMs);
+  }
+
+  return {
+    ready: false,
+    reason: "timeout",
+    snapshot: getOrdersReadinessSnapshot(),
+  };
 }
 
 export function clickRequestReview() {
@@ -239,6 +273,25 @@ function isOrderDetailsPage(url, bodyText) {
 }
 
 function findNextButton() {
+  const nextLi = document.querySelector(
+    "#myo-layout div.pagination-controls ul > li.a-last",
+  );
+  if (nextLi) {
+    if (nextLi.classList.contains("a-disabled")) {
+      return null;
+    }
+
+    const directChildAnchor = nextLi.querySelector(":scope > a");
+    if (directChildAnchor) {
+      return directChildAnchor;
+    }
+
+    const anchor = nextLi.querySelector("a");
+    if (anchor) {
+      return anchor;
+    }
+  }
+
   const allButtons = document.querySelectorAll(
     'button, a[class*="pagination"], a[class*="paging"], input[type="submit"]',
   );
@@ -287,4 +340,58 @@ function simulateRealClick(element) {
   element.dispatchEvent(new PointerEvent("pointerup", opts));
   element.dispatchEvent(new MouseEvent("mouseup", opts));
   element.dispatchEvent(new MouseEvent("click", opts));
+}
+
+function getOrdersReadinessSnapshot() {
+  const url = new URL(window.location.href);
+  const pageParam = url.searchParams.get("page");
+  const pageNumber = Number(pageParam);
+  const pageParamPresent = pageParam != null && pageParam !== "";
+
+  const totalHeading = document.querySelector(
+    ".total-orders-heading > span:first-child",
+  );
+  const totalText = (
+    totalHeading?.innerText ||
+    totalHeading?.textContent ||
+    ""
+  ).trim();
+  const totalMatch = totalText.match(/\d[\d,]*/);
+  const totalOrders = totalMatch
+    ? Number(totalMatch[0].replace(/,/g, ""))
+    : null;
+
+  const perPageSelect = document.querySelector(
+    "select#myo-table-results-per-page",
+  );
+  const perPageValue = perPageSelect?.value;
+  const perPage = perPageValue ? Number(perPageValue) : null;
+
+  const rowCount = document.querySelectorAll("#orders-table tbody tr").length;
+
+  let expectedRowCount = null;
+  if (
+    Number.isFinite(totalOrders) &&
+    Number.isFinite(perPage) &&
+    Number.isFinite(pageNumber) &&
+    pageNumber > 0 &&
+    perPage > 0
+  ) {
+    const alreadyShown = (pageNumber - 1) * perPage;
+    const remaining = Math.max(totalOrders - alreadyShown, 0);
+    expectedRowCount = Math.min(perPage, remaining);
+  }
+
+  return {
+    pageParamPresent,
+    pageNumber: Number.isFinite(pageNumber) ? pageNumber : null,
+    totalOrders: Number.isFinite(totalOrders) ? totalOrders : null,
+    perPage: Number.isFinite(perPage) ? perPage : null,
+    expectedRowCount,
+    rowCount,
+  };
+}
+
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

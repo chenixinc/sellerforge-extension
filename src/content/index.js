@@ -9,6 +9,7 @@ import {
   extractOrders,
   goToNextPage,
   scrapeProductDetails,
+  waitForOrdersReady,
 } from "./dom";
 import { initInventoryOverlay } from "./inventory-overlay";
 
@@ -57,6 +58,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       log("GO_NEXT_PAGE →", response);
       sendResponse(response);
       break;
+
+    case MSG.WAIT_FOR_ORDERS_READY:
+      waitForOrdersReady(message)
+        .then((result) => {
+          log("WAIT_FOR_ORDERS_READY →", result);
+          sendResponse(result);
+        })
+        .catch((err) => {
+          sendResponse({ ready: false, reason: err.message });
+        });
+      return true;
 
     case MSG.CLICK_REQUEST_REVIEW:
       response = clickRequestReview();
