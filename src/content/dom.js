@@ -201,9 +201,7 @@ export function extractOrderIdFromPage() {
 }
 
 export function scrapeProductDetails(hintText = "", root = document) {
-  const containers = root.querySelectorAll(
-    '[class*="ProductDetails-module__container"]',
-  );
+  const containers = root.querySelectorAll("[data-sku].product-cell-container");
   const selection = window.getSelection()?.toString()?.trim() || "";
   const matchText = selection || hintText;
 
@@ -211,22 +209,38 @@ export function scrapeProductDetails(hintText = "", root = document) {
     const text = container.innerText;
     if (matchText && !text.includes(matchText)) continue;
 
-    const lines = text
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const data = { title: "", asin: "", sku: "", fnsku: "", condition: "" };
+    const data = {
+      title: "",
+      asin: "",
+      sku: "",
+      skuLink: "",
+      fnsku: "",
+      condition: "",
+    };
 
-    data.title = lines[0] || "";
+    data.title = container
+      .querySelector(".product-cell-text-content div:nth-child(1)")
+      .innerText.trim();
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line === "ASIN" && lines[i + 1]) data.asin = lines[i + 1];
-      else if (line === "SKU" && lines[i + 1]) data.sku = lines[i + 1];
-      else if (line === "FNSKU" && lines[i + 1]) data.fnsku = lines[i + 1];
-      else if (line === "Condition" && lines[i + 1])
-        data.condition = lines[i + 1];
-    }
+    const items = container.querySelectorAll(
+      ".product-cell-text-content div:nth-child(2) > div",
+    );
+
+    data.asin = items[0].innerText.trim();
+
+    // TODO: new seller central doesn't show ASIN condition on the inventory page
+    // defaulting to "New" for now
+    data.condition = "New";
+
+    items.forEach((item) => {
+      if (item.querySelector("a[href]")) {
+        data.sku = item.innerText.trim();
+        data.skuLink = `/skucentral?mSku=${data.sku}&condition=${data.condition}`;
+      }
+      if (item.innerText.startsWith("X0")) {
+        data.fnsku = item.innerText.trim();
+      }
+    });
 
     if (data.fnsku || data.asin) return data;
   }

@@ -4,16 +4,19 @@ import { scrapeProductDetails } from "./dom";
 import {
   COLORS,
   productTableCSS,
+  supplierActionCSS,
   supplierCSS,
   supplierListCSS,
 } from "./styles";
 
-const HEADER_CELL_SEL =
-  '[class*="__table-"] [class*="__tableHeaderRow-"] > div';
-const LISTING_ROW_SEL = '[class*="__table-"] [data-sku]';
-const LISTING_CELL_SEL = '[class*="__tableContentRow-"] > div';
-
 const PROCESSED_ATTR = "data-sf-suppliers";
+
+const TABLE_SEL = "table.awsui-context-compact-table";
+const HEADER_CELL_SEL = `${TABLE_SEL} thead tr th`;
+const LISTING_ROW_SEL = `${TABLE_SEL} tbody tr`;
+const LISTING_UNPROCESSED_ROW_SEL = `${TABLE_SEL} tbody tr:not([${PROCESSED_ATTR}]), ${TABLE_SEL} tbody tr[${PROCESSED_ATTR}="false"]`;
+const LISTING_CELL_SEL = "td";
+
 const STYLE_ID = "sf-inventory-overlay-styles";
 
 let observer = null;
@@ -42,15 +45,21 @@ export function destroyInventoryOverlay() {
 
 function isManageInventoryPage() {
   const url = window.location.href;
-  return (
+
+  const isLegacyInventoryPage =
     url.includes("sellercentral") &&
-    (url.includes("/inventory") || url.includes("/myinventory"))
-  );
+    (url.includes("/inventory") || url.includes("/myinventory"));
+
+  const isInventoryPage =
+    url.includes("sellercentral") &&
+    url.includes("/amazonsell/manage-products");
+
+  return isLegacyInventoryPage || isInventoryPage;
 }
 
 function findColumnIndex(text) {
   const headerCells = document.querySelectorAll(HEADER_CELL_SEL);
-  const lower = text.toLowerCase();
+  const lower = text.split("\n")[0].toLowerCase().trim();
   for (let i = 0; i < headerCells.length; i++) {
     if (headerCells[i].innerText.trim().toLowerCase().includes(lower)) {
       return i;
@@ -60,28 +69,27 @@ function findColumnIndex(text) {
 }
 
 function processTable() {
-  const detailsColIndex = findColumnIndex("product details");
-  const priceColIndex = findColumnIndex("price and shipping cost");
-  if (detailsColIndex === -1) {
-    log("Inventory overlay: Product details column not found");
+  const productColIndex = findColumnIndex("product");
+  const priceColIndex = findColumnIndex("inventory");
+  if (productColIndex === -1) {
+    log("Inventory overlay: Product column not found");
     return;
   }
 
   log(
-    "Inventory overlay: Product details col",
-    detailsColIndex,
+    "Inventory overlay: Product col",
+    productColIndex,
     "Price col",
     priceColIndex,
   );
 
-  const rows = document.querySelectorAll(LISTING_ROW_SEL);
+  const rows = document.querySelectorAll(LISTING_UNPROCESSED_ROW_SEL);
   rows.forEach((row) => {
-    if (row.hasAttribute(PROCESSED_ATTR)) return;
     row.setAttribute(PROCESSED_ATTR, "true");
 
     const cells = row.querySelectorAll(LISTING_CELL_SEL);
-    const detailsCell = cells[detailsColIndex];
-    if (!detailsCell) return;
+    const productCell = cells[productColIndex];
+    if (!productCell) return;
 
     const priceCell = priceColIndex !== -1 ? cells[priceColIndex] : null;
 
@@ -89,11 +97,11 @@ function processTable() {
     const asin = details?.asin;
     if (!asin) return;
 
-    loadProductAndSuppliers(detailsCell, priceCell, asin);
+    loadProductAndSuppliers(row, productCell, priceCell, asin);
   });
 }
 
-async function loadProductAndSuppliers(detailsCell, priceCell, asin) {
+async function loadProductAndSuppliers(row, productCell, priceCell, asin) {
   log("Inventory overlay: loading data for ASIN", asin);
 
   try {
@@ -103,10 +111,15 @@ async function loadProductAndSuppliers(detailsCell, priceCell, asin) {
     });
     if (!res?.ok) throw new Error(res?.error || "Failed to fetch ASIN data");
 
-    // Render product info table (UPC, EAN, MPN) into __textFieldsContainer- inside details cell
-    if (res.product) {
+    // Render product info table (UPC, EAN, MPN) into __textFieldsContainer- inside product cell
+    const details = scrapeProductDetails("", row);
+    if (details || res.product) {
       const p = res.product;
+
       const rows = [
+        ["ASIN", asin],
+        ["FNSKU", details.fnsku],
+        ["SKU", details.sku, details.skuLink],
         ["UPC", p.upc],
         ["EAN", p.ean],
         ["MPN", p.mpn],
@@ -114,11 +127,11 @@ async function loadProductAndSuppliers(detailsCell, priceCell, asin) {
 
       if (rows.length) {
         const target =
-          detailsCell.querySelector('[class*="__textFieldsContainer-"]') ||
-          detailsCell;
+          productCell.querySelector(".product-cell-text-content") ||
+          productCell;
         const table = document.createElement("table");
         table.className = "sf-product-table";
-        for (const [label, value] of rows) {
+        for (const [label, value, link] of rows) {
           const tr = document.createElement("tr");
           tr.dataset.value = value;
           tr.addEventListener("click", () => {
@@ -130,12 +143,24 @@ async function loadProductAndSuppliers(detailsCell, priceCell, asin) {
           const th = document.createElement("th");
           th.textContent = label;
           const td = document.createElement("td");
-          td.textContent = value;
+          if (link) {
+            const a = document.createElement("a");
+            a.href = link;
+            a.target = "_blank";
+            a.textContent = value;
+            td.appendChild(a);
+          } else {
+            td.textContent = value;
+          }
           tr.appendChild(th);
           tr.appendChild(td);
           table.appendChild(tr);
         }
         target.appendChild(table);
+
+        productCell.querySelector(
+          ".product-cell-text-content div:nth-child(2)",
+        ).style.display = "none";
       }
     }
 
@@ -168,6 +193,9 @@ function renderSupplierItem(supplier) {
   el.className = "sf-supplier-item";
   el.dataset.url = supplier.url;
 
+  const row = document.createElement("div");
+  row.className = "sf-supplier-row-wrap";
+
   const link = document.createElement("a");
   link.className = "sf-supplier-row";
   link.href = supplier.url;
@@ -187,16 +215,39 @@ function renderSupplierItem(supplier) {
   nameSpan.textContent = title;
   link.appendChild(nameSpan);
 
-  el.appendChild(link);
+  const refreshButton = document.createElement("button");
+  refreshButton.type = "button";
+  refreshButton.className = "sf-supplier-refresh";
+  refreshButton.title = "Refresh supplier data";
+  refreshButton.setAttribute("aria-label", "Refresh supplier data");
+  refreshButton.textContent = "↻";
+  refreshButton.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fetchSupplierData(el, supplier.url, true, refreshButton);
+  });
+
+  row.appendChild(link);
+  row.appendChild(refreshButton);
+  el.appendChild(row);
   return el;
 }
 
-async function fetchSupplierData(el, url) {
+async function fetchSupplierData(
+  el,
+  url,
+  refresh = false,
+  refreshButton = null,
+) {
   if (!url) return;
   try {
+    if (refreshButton) {
+      refreshButton.disabled = true;
+    }
     const response = await chrome.runtime.sendMessage({
       type: MSG.PARSE_SUPPLIER,
       url,
+      refresh,
     });
     if (!response?.ok || !response.data) return;
     const d = response.data;
@@ -224,40 +275,53 @@ async function fetchSupplierData(el, url) {
       info.appendChild(priceEl);
     }
 
-    if (d.stock && d.stock.length) {
-      const stockDiv = document.createElement("div");
-      stockDiv.className = "sf-sp-stock";
-      for (const s of d.stock) {
-        const stockSpan = document.createElement("span");
-        const inStock = parseInt(s.stock.replace(/^\D+/, ""), 10) > 0;
-        stockSpan.className = `sf-sp-stock-item ${inStock ? "sf-in-stock" : "sf-no-stock"}`;
+    if (d.stock || d.stock_eta) {
+      try {
+        const stockDiv = document.createElement("div");
+        stockDiv.className = "sf-sp-stock";
+        for (const s of d.stock) {
+          const stockSpan = document.createElement("span");
+          const inStock =
+            s.stock && parseInt(s.stock.replace(/^\D+/, ""), 10) > 0;
+          stockSpan.className = `sf-sp-stock-item ${inStock ? "sf-in-stock" : s.stock_eta ? "sf-stock-eta" : "sf-no-stock"}`;
 
-        const locText = document.createTextNode(`${s.location}: `);
-        stockSpan.appendChild(locText);
+          const locText = document.createTextNode(`${s.location}: `);
+          stockSpan.appendChild(locText);
 
-        const strong = document.createElement("strong");
-        strong.textContent = s.stock;
-        stockSpan.appendChild(strong);
+          const strong = document.createElement("strong");
+          strong.textContent = s.stock || s.stock_eta;
+          stockSpan.appendChild(strong);
 
-        if (s.shipping_eta) {
-          const eta = document.createTextNode(` (${s.shipping_eta})`);
-          stockSpan.appendChild(eta);
+          if (s.shipping_eta) {
+            const eta = document.createTextNode(` (${s.shipping_eta})`);
+            stockSpan.appendChild(eta);
+          }
+
+          stockDiv.appendChild(stockSpan);
         }
-
-        stockDiv.appendChild(stockSpan);
+        info.appendChild(stockDiv);
+      } catch (err) {
+        log("Failed to render stock info for", url, err.message);
       }
-      info.appendChild(stockDiv);
+    }
+
+    if (refresh) {
+      el.querySelector(".sf-supplier-parsed")?.remove();
     }
 
     el.appendChild(info);
   } catch {
     // silently ignore
+  } finally {
+    if (refreshButton) {
+      refreshButton.disabled = false;
+    }
   }
 }
 
 function waitForTable() {
-  const table = document.querySelector('[class*="__table-"]');
-  if (table && findColumnIndex("product details") !== -1) {
+  const table = document.querySelector(TABLE_SEL);
+  if (table && findColumnIndex("product") !== -1) {
     processTable();
     observeTableChanges(table);
     return;
@@ -265,8 +329,8 @@ function waitForTable() {
 
   // Table or headers not ready yet — watch for them to appear
   const bodyObserver = new MutationObserver(() => {
-    const t = document.querySelector('[class*="__table-"]');
-    if (t && findColumnIndex("product details") !== -1) {
+    const t = document.querySelector(TABLE_SEL);
+    if (t && findColumnIndex("product") !== -1) {
       bodyObserver.disconnect();
       processTable();
       observeTableChanges(t);
@@ -293,11 +357,14 @@ function watchForChanges() {
   // Watch the body for table replacements (search/filter redraws the table
   // element entirely) and SPA navigations that change the URL.
   bodyObserver = new MutationObserver(() => {
-    const table = document.querySelector('[class*="__table-"]');
+    const table = document.querySelector(TABLE_SEL);
+    const unprocessedRows = document.querySelectorAll(
+      LISTING_UNPROCESSED_ROW_SEL,
+    );
     if (
       table &&
-      table !== currentTable &&
-      findColumnIndex("product details") !== -1
+      findColumnIndex("product") !== -1 &&
+      (table !== currentTable || unprocessedRows.length > 0)
     ) {
       log("Inventory overlay: table replaced, re-attaching");
       processTable();
@@ -323,6 +390,7 @@ function injectStyles() {
     ${productTableCSS("sf-")}
     ${supplierListCSS("sf-")}
     ${supplierCSS("sf-")}
+    ${supplierActionCSS("sf-")}
     .sf-supplier-item { border: 1px solid ${c.borderLight}; background: #f8f8f8; }
     .sf-supplier-item:hover { background: #f0f0f0; }
   `;

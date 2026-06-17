@@ -285,7 +285,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case MSG.PARSE_SUPPLIER:
-      handleParseSupplier(message.url, sendResponse);
+      handleParseSupplier(message.url, message.refresh, sendResponse);
       return true;
 
     case MSG.GENERATE_LABEL:
@@ -376,11 +376,14 @@ async function handleRemoveSupplier(asin, supplierId, sendResponse) {
   }
 }
 
-async function handleParseSupplier(url, sendResponse) {
+async function handleParseSupplier(url, refresh = false, sendResponse) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/supplier/parse?url=${encodeURIComponent(url)}`,
-    );
+    const params = new URLSearchParams();
+    params.set("url", url);
+    if (refresh) {
+      params.set("refresh", "true");
+    }
+    const res = await fetch(`${API_BASE}/api/supplier/parse?${params}`);
     if (!res.ok) {
       sendResponse({ ok: true, data: null });
       return;

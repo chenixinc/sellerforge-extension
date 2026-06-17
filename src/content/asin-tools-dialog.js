@@ -4,6 +4,7 @@ import {
   COLORS,
   FONT_FAMILY,
   productTableCSS,
+  supplierActionCSS,
   supplierCSS,
   supplierListCSS,
 } from "./styles";
@@ -236,11 +237,16 @@ function supplierItem(supplier) {
     : `<span class="supplier-icon-placeholder">\uD83C\uDF10</span>`;
   return `
     <div class="supplier-item" data-id="${escapeAttr(supplier.id)}" data-url="${escapeAttr(supplier.url)}">
-      <a class="supplier-row" href="${escapeAttr(supplier.url)}" target="_blank" rel="noopener">
-        ${iconHtml}
-        <span class="supplier-link">${escapeHtml(title)}</span>
-        <button class="supplier-remove" title="Remove">&times;</button>
-      </a>
+      <div class="supplier-row-wrap">
+        <a class="supplier-row" href="${escapeAttr(supplier.url)}" target="_blank" rel="noopener">
+          ${iconHtml}
+          <span class="supplier-link">${escapeHtml(title)}</span>
+        </a>
+        <div class="supplier-actions">
+          <button type="button" class="supplier-refresh" title="Refresh supplier data" aria-label="Refresh supplier data">↻</button>
+          <button type="button" class="supplier-remove" title="Remove">&times;</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -280,6 +286,7 @@ function wireSuppliers(shadow) {
       const el = wrapper.firstElementChild;
       list.prepend(el);
       wireRemoveBtn(el, list, errorEl);
+      wireRefreshBtn(el);
       fetchSupplierData(el);
       input.value = "";
     } catch (err) {
@@ -303,7 +310,19 @@ function wireSuppliers(shadow) {
 
   list.querySelectorAll(".supplier-item").forEach((el) => {
     wireRemoveBtn(el, list, errorEl);
+    wireRefreshBtn(el);
     fetchSupplierData(el);
+  });
+}
+
+function wireRefreshBtn(el) {
+  const refreshBtn = el.querySelector(".supplier-refresh");
+  if (!refreshBtn) return;
+
+  refreshBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fetchSupplierData(el, true, refreshBtn);
   });
 }
 
@@ -330,31 +349,57 @@ function wireRemoveBtn(el, list, errorEl) {
   });
 }
 
-async function fetchSupplierData(el) {
+async function fetchSupplierData(el, refresh = false, refreshButton = null) {
   const url = el.dataset.url;
   if (!url) return;
   try {
+    if (refreshButton) {
+      refreshButton.disabled = true;
+    }
     const response = await chrome.runtime.sendMessage({
       type: MSG.PARSE_SUPPLIER,
       url,
+      refresh,
     });
     if (!response.ok || !response.data) return;
     const d = response.data;
-    const stockHtml = (d.stock || [])
-      .map((s) => {
-        const qty = parseInt(s.stock.replace(/^\D+/, ""), 10);
-        const cls = qty > 0 ? "in-stock" : "no-stock";
-        const eta = s.shipping_eta ? ` (${escapeHtml(s.shipping_eta)})` : "";
-        return `<span class="sp-stock-item ${cls}">${escapeHtml(s.location)}: <strong>${escapeHtml(s.stock)}</strong>${eta}</span>`;
-      })
-      .join("");
-    if (!d.price && !stockHtml) return;
+
+    if (!d.price && !(d.stock || []).length) return;
+
     const container = document.createElement("div");
     container.className = "supplier-parsed";
-    container.innerHTML = `
-        ${d.price ? `<span class="sp-price" title="Click to copy">${escapeHtml(`$${formatPrice(d.price)}`)}</span>` : ""}
-        ${stockHtml ? `<div class="sp-stock">${stockHtml}</div>` : ""}
-    `;
+
+    if (d.price) {
+      const priceHtml = `<span class="sp-price" title="Click to copy">${escapeHtml(`$${formatPrice(d.price)}`)}</span>`;
+      container.insertAdjacentHTML("beforeend", priceHtml);
+    }
+
+    if (d.stock || d.stock_eta) {
+      try {
+        const stockDiv = document.createElement("div");
+        stockDiv.className = "sp-stock";
+        for (const s of d.stock) {
+          const qty = s.stock ? parseInt(s.stock.replace(/^\D+/, ""), 10) : NaN;
+          const cls =
+            qty > 0 ? "in-stock" : s.stock_eta ? "stock-eta" : "no-stock";
+          const qtyOrEta = s.stock || s.stock_eta || "";
+          const eta = s.shipping_eta ? ` (${escapeHtml(s.shipping_eta)})` : "";
+
+          stockDiv.insertAdjacentHTML(
+            "beforeend",
+            `<span class="sp-stock-item ${cls}">${escapeHtml(s.location || "Unknown")}: <strong>${escapeHtml(qtyOrEta)}</strong>${eta}</span>`,
+          );
+        }
+        container.appendChild(stockDiv);
+      } catch {
+        // silently ignore stock render issues
+      }
+    }
+
+    if (refresh) {
+      el.querySelector(".supplier-parsed")?.remove();
+    }
+
     el.appendChild(container);
     const priceEl = container.querySelector(".sp-price");
     if (priceEl) {
@@ -371,6 +416,10 @@ async function fetchSupplierData(el) {
     }
   } catch {
     // silently ignore
+  } finally {
+    if (refreshButton) {
+      refreshButton.disabled = false;
+    }
   }
 }
 
@@ -411,5 +460,6 @@ function getStyles() {
     .supplier-error { color: ${c.error}; font-size: 0.85em; margin-bottom: 6px; }
     ${supplierListCSS()}
     ${supplierCSS()}
+    ${supplierActionCSS()}
   `;
 }
