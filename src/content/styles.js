@@ -15,7 +15,7 @@ export const COLORS = {
   hover: "#f5f5f5",
   muted: "#696969",
   mutedLight: "#888",
-  success: "#4caf50",
+  success: "#008030",
   text: "#333",
 };
 
@@ -55,6 +55,8 @@ export function supplierCSS(p = "") {
     ${s(p, "supplier-parsed")} { margin-top: 4px; gap: 4px; font-size: 0.9em; color: ${c.text}; display: flex; flex-direction: column; gap: 4px; padding-left: 24px; }
     ${s(p, "supplier-parsed-loading")} { font-size: 0.9em; color: #999; }
     ${s(p, "sp-price")} { font-weight: 700; font-size: 1.3em; cursor: pointer; white-space: nowrap; position: relative; }
+    ${s(p, "sp-price")}.${p}sp-price-good-deal { color: ${c.success}; }
+    ${s(p, "sp-price")}.${p}sp-price-expensive { color: ${c.error}; }
     ${s(p, "sp-price")}:hover { text-decoration: underline; }
     ${s(p, "sp-price")}::after { content: '✓'; margin-left: 4px; color: ${c.success}; font-size: 1em; visibility: hidden; opacity: 0; }
     ${s(p, "sp-price")}.${p}copied::after { visibility: visible; opacity: 1; }

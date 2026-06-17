@@ -23,7 +23,12 @@ export function showAsinToolsDialog(data) {
     return;
   }
 
-  showProduct(data.product, data.suppliers || [], data.productDetails || null);
+  showProduct(
+    data.product,
+    data.suppliers || [],
+    data.productDetails || null,
+    data.asinPrices || null,
+  );
 }
 
 function showLoading() {
@@ -34,7 +39,7 @@ function showLoading() {
   wireClose(dlg);
 }
 
-function showProduct(product, suppliers, productDetails) {
+function showProduct(product, suppliers, productDetails, asinPrices) {
   // If already showing loading, reuse its host; otherwise create fresh
   if (!currentHost) {
     removeOverlay();
@@ -46,6 +51,8 @@ function showProduct(product, suppliers, productDetails) {
   const labelCode = productDetails?.fnsku || productDetails?.asin;
   const labelTitle = productDetails?.title || "";
   const labelCondition = productDetails?.condition || "New";
+  const goodDealPrice = asinPrices?.goodDealPrice ?? "";
+  const expensivePrice = asinPrices?.expensivePrice ?? "";
 
   dlg.innerHTML = `
     <button type="button" class="close-btn" title="Close">&times;</button>
@@ -62,7 +69,7 @@ function showProduct(product, suppliers, productDetails) {
     ${
       labelCode
         ? `
-    <div class="label-section">
+    <div class="label-section dialog-section">
       <div class="label-row">
         <select class="label-size-select" disabled>
           <option>Loading sizes…</option>
@@ -75,7 +82,42 @@ function showProduct(product, suppliers, productDetails) {
     </div>`
         : ""
     }
-    <div class="suppliers-section" data-asin="${escapeAttr(product.asin)}">
+    <div class="price-targets-section dialog-section" data-asin="${escapeAttr(product.asin)}">
+      <div class="price-targets-header">Price Targets</div>
+      <div class="price-targets-grid">
+        <label class="price-target-field">
+          <span class="price-target-label">Good deal price</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            inputmode="decimal"
+            class="price-target-input"
+            name="goodDealPrice"
+            value="${escapeAttr(String(goodDealPrice))}"
+            placeholder="0.00"
+          />
+        </label>
+        <label class="price-target-field">
+          <span class="price-target-label">Expensive price</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            inputmode="decimal"
+            class="price-target-input"
+            name="expensivePrice"
+            value="${escapeAttr(String(expensivePrice))}"
+            placeholder="0.00"
+          />
+        </label>
+      </div>
+      <div class="price-target-actions">
+        <div class="price-target-status" aria-live="polite"></div>
+        <button type="button" class="price-target-save-btn">Save</button>
+      </div>
+    </div>
+    <div class="suppliers-section dialog-section" data-asin="${escapeAttr(product.asin)}">
       <div class="suppliers-header">Suppliers</div>
       <div class="supplier-add-row">
         <input type="url" class="supplier-input" placeholder="https://supplier-website.com" />
@@ -89,6 +131,7 @@ function showProduct(product, suppliers, productDetails) {
   `;
 
   wireClose(dlg);
+  wirePriceTargets(shadow);
   wireSuppliers(shadow);
   wireLabelBtn(shadow);
 
@@ -196,6 +239,152 @@ function wireLabelBtn(shadow) {
       condition,
       size: select.value,
     });
+  });
+}
+
+function wirePriceTargets(shadow) {
+  const section = shadow.querySelector(".price-targets-section");
+  if (!section) return;
+
+  const asin = section.dataset.asin;
+  const statusEl = section.querySelector(".price-target-status");
+  const saveBtn = section.querySelector(".price-target-save-btn");
+  const inputs = Array.from(section.querySelectorAll(".price-target-input"));
+  const goodDealInput = section.querySelector('[name="goodDealPrice"]');
+  const expensiveInput = section.querySelector('[name="expensivePrice"]');
+  let clearStatusTimer = null;
+
+  function setStatus(message, isError = false) {
+    statusEl.textContent = message;
+    if (message) {
+      statusEl.dataset.state = isError ? "error" : "success";
+    } else {
+      delete statusEl.dataset.state;
+    }
+    if (clearStatusTimer) {
+      clearTimeout(clearStatusTimer);
+    }
+    if (message) {
+      clearStatusTimer = setTimeout(() => {
+        statusEl.textContent = "";
+        delete statusEl.dataset.state;
+      }, 2000);
+    }
+  }
+
+  function parsePrice(input) {
+    const rawValue = input.value.trim();
+    if (!rawValue) return null;
+
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error(
+        `Invalid ${input.name === "goodDealPrice" ? "good deal" : "expensive"} price`,
+      );
+    }
+
+    return Math.round(parsed * 100) / 100;
+  }
+
+  function getThresholds() {
+    return {
+      goodDealPrice: parsePrice(goodDealInput),
+      expensivePrice: parsePrice(expensiveInput),
+    };
+  }
+
+  async function savePrices() {
+    try {
+      const prices = getThresholds();
+
+      inputs.forEach((input) => {
+        input.disabled = true;
+      });
+      saveBtn.disabled = true;
+      setStatus("Saving...");
+
+      const response = await chrome.runtime.sendMessage({
+        type: MSG.SAVE_ASIN_PRICES,
+        asin,
+        prices,
+      });
+
+      if (!response?.ok) {
+        throw new Error(response?.error || "Failed to save prices");
+      }
+
+      goodDealInput.value = response.prices.goodDealPrice ?? "";
+      expensiveInput.value = response.prices.expensivePrice ?? "";
+      updateSupplierPriceColors(shadow, getThresholds());
+      setStatus("Saved");
+    } catch (err) {
+      setStatus(err.message || "Failed to save prices", true);
+    } finally {
+      inputs.forEach((input) => {
+        input.disabled = false;
+      });
+      saveBtn.disabled = false;
+    }
+  }
+
+  saveBtn.addEventListener("click", savePrices);
+
+  inputs.forEach((input) => {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveBtn.click();
+      }
+    });
+  });
+}
+
+function getSupplierPriceState(price, thresholds) {
+  if (!Number.isFinite(price)) return "";
+  if (thresholds.goodDealPrice != null && price <= thresholds.goodDealPrice) {
+    return "sp-price-good-deal";
+  }
+  if (thresholds.expensivePrice != null && price >= thresholds.expensivePrice) {
+    return "sp-price-expensive";
+  }
+  return "";
+}
+
+function applySupplierPriceState(priceEl, price, thresholds) {
+  priceEl.classList.remove("sp-price-good-deal", "sp-price-expensive");
+  const stateClass = getSupplierPriceState(price, thresholds);
+  if (stateClass) {
+    priceEl.classList.add(stateClass);
+  }
+}
+
+function getDialogPriceThresholds(shadow) {
+  const section = shadow.querySelector(".price-targets-section");
+  if (!section) {
+    return { goodDealPrice: null, expensivePrice: null };
+  }
+
+  const parseInputValue = (name) => {
+    const input = section.querySelector(`[name="${name}"]`);
+    const rawValue = input?.value.trim();
+    if (!rawValue) return null;
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  return {
+    goodDealPrice: parseInputValue("goodDealPrice"),
+    expensivePrice: parseInputValue("expensivePrice"),
+  };
+}
+
+function updateSupplierPriceColors(
+  shadow,
+  thresholds = getDialogPriceThresholds(shadow),
+) {
+  shadow.querySelectorAll(".supplier-parsed .sp-price").forEach((priceEl) => {
+    const price = Number(priceEl.dataset.price);
+    applySupplierPriceState(priceEl, price, thresholds);
   });
 }
 
@@ -363,6 +552,7 @@ async function fetchSupplierData(el, refresh = false, refreshButton = null) {
     });
     if (!response.ok || !response.data) return;
     const d = response.data;
+    const thresholds = getDialogPriceThresholds(currentShadow);
 
     if (!d.price && !(d.stock || []).length) return;
 
@@ -372,6 +562,9 @@ async function fetchSupplierData(el, refresh = false, refreshButton = null) {
     if (d.price) {
       const priceHtml = `<span class="sp-price" title="Click to copy">${escapeHtml(`$${formatPrice(d.price)}`)}</span>`;
       container.insertAdjacentHTML("beforeend", priceHtml);
+      const priceEl = container.querySelector(".sp-price");
+      priceEl.dataset.price = String(d.price);
+      applySupplierPriceState(priceEl, Number(d.price), thresholds);
     }
 
     if (d.stock || d.stock_eta) {
@@ -441,6 +634,21 @@ function getStyles() {
     .product-table td { padding: 5px 8px; color: inherit; }
     .product-table tr.copied td:last-child::after { content: '✓ Copied'; font-size: 0.8em; }
     .loading { text-align: center; padding: 24px; color: ${c.muted}; }
+    .dialog-section + .dialog-section { margin-top: 16px; padding-top: 12px; border-top: 1px solid ${c.borderLight}; }
+    .price-targets-header { font-weight: 600; font-size: 0.95em; margin-bottom: 8px; }
+    .price-targets-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .price-target-field { display: flex; flex-direction: column; gap: 4px; }
+    .price-target-label { font-size: 0.85em; color: ${c.muted}; }
+    .price-target-input { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid ${c.border}; border-radius: 6px; font: inherit; font-size: 0.9em; background: #fff; }
+    .price-target-input:focus { outline: none; border-color: ${c.primary}; }
+    .price-target-input:disabled { background: ${c.hover}; color: #999; }
+    .price-target-actions { margin-top: 8px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .price-target-save-btn { padding: 6px 14px; background: ${c.primary}; color: #fff; border: none; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.9em; white-space: nowrap; }
+    .price-target-save-btn:hover { background: ${c.primaryHover}; }
+    .price-target-save-btn:disabled { background: ${c.primaryDisabled}; cursor: not-allowed; }
+    .price-target-status { min-height: 18px; font-size: 0.85em; color: ${c.muted}; text-align: right; }
+    .price-target-status[data-state="error"] { color: ${c.error}; }
+    .price-target-status[data-state="success"] { color: ${c.success}; }
     .label-section { margin-top: 12px; }
     .label-row { display: flex; gap: 8px; }
     .label-size-select { flex: 1; padding: 6px 10px; border: 1px solid ${c.border}; border-radius: 6px; font: inherit; font-size: 0.9em; background: #fff; }
@@ -449,7 +657,6 @@ function getStyles() {
     .label-btn { padding: 6px 14px; background: ${c.primary}; color: #fff; border: none; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.9em; white-space: nowrap; }
     .label-btn:hover { background: ${c.primaryHover}; }
     .label-btn:disabled { background: ${c.primaryDisabled}; cursor: not-allowed; }
-    .suppliers-section { margin-top: 16px; border-top: 1px solid ${c.borderLight}; padding-top: 12px; }
     .suppliers-header { font-weight: 600; font-size: 0.95em; margin-bottom: 8px; }
     .supplier-add-row { display: flex; gap: 8px; margin-bottom: 8px; }
     .supplier-input { flex: 1; padding: 6px 10px; border: 1px solid ${c.border}; border-radius: 6px; font: inherit; font-size: 0.9em; }

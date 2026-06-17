@@ -168,10 +168,14 @@ async function loadProductAndSuppliers(row, productCell, priceCell, asin) {
     if (res.suppliers?.length && priceCell) {
       const suppliersDiv = document.createElement("div");
       suppliersDiv.className = "sf-supplier-list";
+      const priceThresholds = {
+        goodDealPrice: res.asinPrices?.goodDealPrice ?? null,
+        expensivePrice: res.asinPrices?.expensivePrice ?? null,
+      };
       for (const supplier of res.suppliers) {
         const el = renderSupplierItem(supplier);
         suppliersDiv.appendChild(el);
-        fetchSupplierData(el, supplier.url);
+        fetchSupplierData(el, supplier.url, false, null, priceThresholds);
       }
       priceCell.appendChild(suppliersDiv);
     }
@@ -238,6 +242,7 @@ async function fetchSupplierData(
   url,
   refresh = false,
   refreshButton = null,
+  thresholds = { goodDealPrice: null, expensivePrice: null },
 ) {
   if (!url) return;
   try {
@@ -262,6 +267,7 @@ async function fetchSupplierData(
       priceEl.className = "sf-sp-price";
       priceEl.title = "Click to copy";
       priceEl.textContent = `$${formatPrice(d.price)}`;
+      applySupplierPriceState(priceEl, Number(d.price), thresholds, "sf-");
       priceEl.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -316,6 +322,28 @@ async function fetchSupplierData(
     if (refreshButton) {
       refreshButton.disabled = false;
     }
+  }
+}
+
+function getSupplierPriceState(price, thresholds) {
+  if (!Number.isFinite(price)) return "";
+  if (thresholds.goodDealPrice != null && price <= thresholds.goodDealPrice) {
+    return "sp-price-good-deal";
+  }
+  if (thresholds.expensivePrice != null && price >= thresholds.expensivePrice) {
+    return "sp-price-expensive";
+  }
+  return "";
+}
+
+function applySupplierPriceState(priceEl, price, thresholds, prefix = "") {
+  priceEl.classList.remove(
+    `${prefix}sp-price-good-deal`,
+    `${prefix}sp-price-expensive`,
+  );
+  const stateClass = getSupplierPriceState(price, thresholds);
+  if (stateClass) {
+    priceEl.classList.add(`${prefix}${stateClass}`);
   }
 }
 
