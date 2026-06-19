@@ -9,11 +9,9 @@ import {
 import { getCurrentUser, initFirebase, signIn, signOut } from "./firebase/auth";
 import {
   addSupplier,
-  getAsinPrices,
   getRequestedOrders,
   getSuppliers,
   removeSupplier,
-  saveAsinPrices,
   stopWatchingOrders,
   watchRequestedOrders,
 } from "./firebase/firestore";
@@ -138,14 +136,14 @@ async function handleAsinTools(info, tab) {
   );
 
   try {
-    const { product, suppliers, asinPrices } = await getAsinData(asin);
+    const { product, suppliers, revenueEstimate } = await getAsinData(asin);
     chrome.tabs.sendMessage(
       tab.id,
       {
         type: MSG.SHOW_ASIN_TOOLS,
         product,
         suppliers,
-        asinPrices,
+        revenueEstimate,
         productDetails,
       },
       { frameId: 0 },
@@ -164,20 +162,31 @@ async function handleAsinTools(info, tab) {
 }
 
 async function getAsinData(asin) {
-  const [res, suppliers, asinPrices] = await Promise.all([
+  const [res, suppliers, revenueEstimate] = await Promise.all([
     fetch(`${API_BASE}/api/product/${encodeURIComponent(asin)}`),
     getSuppliers(asin).catch(() => []),
-    getAsinPrices(asin).catch(() => ({
-      goodDealPrice: null,
-      expensivePrice: null,
-    })),
+    getRevenueEstimate(asin),
   ]);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Server error (${res.status})`);
   }
   const product = await res.json();
-  return { product, suppliers, asinPrices };
+  return { product, suppliers, revenueEstimate };
+}
+
+async function getRevenueEstimate(asin) {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/calculate-revenue/${encodeURIComponent(asin)}`,
+    );
+    if (!res.ok) {
+      return null;
+    }
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 function hasRunData(state) {
@@ -277,14 +286,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case MSG.GET_ASIN_DATA:
       getAsinData(message.asin)
-        .then(({ product, suppliers, asinPrices }) =>
-          sendResponse({ ok: true, product, suppliers, asinPrices }),
+        .then(({ product, suppliers, revenueEstimate }) =>
+          sendResponse({ ok: true, product, suppliers, revenueEstimate }),
         )
         .catch((err) => sendResponse({ ok: false, error: err.message }));
-      return true;
-
-    case MSG.SAVE_ASIN_PRICES:
-      handleSaveAsinPrices(message.asin, message.prices, sendResponse);
       return true;
 
     case MSG.ADD_SUPPLIER:
@@ -382,15 +387,6 @@ async function handleRemoveSupplier(asin, supplierId, sendResponse) {
   try {
     await removeSupplier(asin, supplierId);
     sendResponse({ ok: true });
-  } catch (err) {
-    sendResponse({ ok: false, error: err.message });
-  }
-}
-
-async function handleSaveAsinPrices(asin, prices, sendResponse) {
-  try {
-    const saved = await saveAsinPrices(asin, prices || {});
-    sendResponse({ ok: true, prices: saved });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }

@@ -131,17 +131,13 @@ export function stopWatchingOrders() {
 // --- Suppliers ---
 
 async function suppliersCollection(asin) {
-  const docRef = await asinDocRef(asin);
-  return docRef.collection("items");
-}
-
-async function asinDocRef(asin) {
   const user = await requireUser();
   return getDb()
     .collection("users")
     .doc(user.uid)
     .collection("suppliers")
-    .doc(asin);
+    .doc(asin)
+    .collection("items");
 }
 
 export async function getSuppliers(asin) {
@@ -162,41 +158,4 @@ export async function addSupplier(asin, { url, title, icon }) {
 export async function removeSupplier(asin, supplierId) {
   const col = await suppliersCollection(asin);
   await col.doc(supplierId).delete();
-}
-
-export async function getAsinPrices(asin) {
-  const docRef = await asinDocRef(asin);
-  const snapshot = await docRef.get();
-  const data = snapshot.data() || {};
-
-  return {
-    goodDealPrice: data.goodDealPrice ?? null,
-    expensivePrice: data.expensivePrice ?? null,
-  };
-}
-
-export async function saveAsinPrices(asin, { goodDealPrice, expensivePrice }) {
-  const docRef = await asinDocRef(asin);
-  const now = new Date().toISOString();
-
-  await docRef.set(
-    {
-      goodDealPrice:
-        goodDealPrice == null
-          ? firebase.firestore.FieldValue.delete()
-          : goodDealPrice,
-      expensivePrice:
-        expensivePrice == null
-          ? firebase.firestore.FieldValue.delete()
-          : expensivePrice,
-      updatedAt: now,
-    },
-    { merge: true },
-  );
-
-  return {
-    goodDealPrice: goodDealPrice ?? null,
-    expensivePrice: expensivePrice ?? null,
-    updatedAt: now,
-  };
 }

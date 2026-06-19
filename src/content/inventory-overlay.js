@@ -168,14 +168,16 @@ async function loadProductAndSuppliers(row, productCell, priceCell, asin) {
     if (res.suppliers?.length && priceCell) {
       const suppliersDiv = document.createElement("div");
       suppliersDiv.className = "sf-supplier-list";
-      const priceThresholds = {
-        goodDealPrice: res.asinPrices?.goodDealPrice ?? null,
-        expensivePrice: res.asinPrices?.expensivePrice ?? null,
-      };
       for (const supplier of res.suppliers) {
-        const el = renderSupplierItem(supplier);
+        const el = renderSupplierItem(supplier, res.revenueEstimate || null);
         suppliersDiv.appendChild(el);
-        fetchSupplierData(el, supplier.url, false, null, priceThresholds);
+        fetchSupplierData(
+          el,
+          supplier.url,
+          false,
+          null,
+          res.revenueEstimate || null,
+        );
       }
       priceCell.appendChild(suppliersDiv);
     }
@@ -184,7 +186,7 @@ async function loadProductAndSuppliers(row, productCell, priceCell, asin) {
   }
 }
 
-function renderSupplierItem(supplier) {
+function renderSupplierItem(supplier, revenueEstimate = null) {
   let hostname;
   try {
     hostname = new URL(supplier.url).hostname;
@@ -228,7 +230,7 @@ function renderSupplierItem(supplier) {
   refreshButton.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    fetchSupplierData(el, supplier.url, true, refreshButton);
+    fetchSupplierData(el, supplier.url, true, refreshButton, revenueEstimate);
   });
 
   row.appendChild(link);
@@ -242,7 +244,7 @@ async function fetchSupplierData(
   url,
   refresh = false,
   refreshButton = null,
-  thresholds = { goodDealPrice: null, expensivePrice: null },
+  revenueEstimate = null,
 ) {
   if (!url) return;
   try {
@@ -267,7 +269,19 @@ async function fetchSupplierData(
       priceEl.className = "sf-sp-price";
       priceEl.title = "Click to copy";
       priceEl.textContent = `$${formatPrice(d.price)}`;
-      applySupplierPriceState(priceEl, Number(d.price), thresholds, "sf-");
+      const cogs = Number(d.price);
+      applyPriceMarginState(priceEl, cogs, revenueEstimate);
+      info.appendChild(priceEl);
+
+      const metrics = getProfitMetrics(revenueEstimate, cogs);
+      if (metrics) {
+        const meta = document.createElement("div");
+        meta.className = "sf-sp-profit-meta";
+        applyProfitMetaState(meta, cogs, revenueEstimate);
+        meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
+        info.appendChild(meta);
+      }
+
       priceEl.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -278,7 +292,6 @@ async function fetchSupplierData(
             setTimeout(() => priceEl.classList.remove("sf-copied"), 1200);
           });
       });
-      info.appendChild(priceEl);
     }
 
     if (d.stock || d.stock_eta) {
@@ -325,26 +338,68 @@ async function fetchSupplierData(
   }
 }
 
-function getSupplierPriceState(price, thresholds) {
-  if (!Number.isFinite(price)) return "";
-  if (thresholds.goodDealPrice != null && price <= thresholds.goodDealPrice) {
-    return "sp-price-good-deal";
+function getRoiPercent(revenueEstimate, cogs) {
+  const revenueBeforeCogs = Number(
+    revenueEstimate?.estimated_revenue_before_cogs?.amount,
+  );
+
+  if (
+    !Number.isFinite(cogs) ||
+    !Number.isFinite(revenueBeforeCogs) ||
+    cogs <= 0
+  ) {
+    return null;
   }
-  if (thresholds.expensivePrice != null && price >= thresholds.expensivePrice) {
-    return "sp-price-expensive";
+
+  return ((revenueBeforeCogs - cogs) / cogs) * 100;
+}
+
+function getProfitMetrics(revenueEstimate, cogs) {
+  const revenueBeforeCogs = Number(
+    revenueEstimate?.estimated_revenue_before_cogs?.amount,
+  );
+  const roiPercent = getRoiPercent(revenueEstimate, cogs);
+
+  if (!Number.isFinite(revenueBeforeCogs) || !Number.isFinite(roiPercent)) {
+    return null;
   }
+
+  return {
+    netProfit: revenueBeforeCogs - cogs,
+    roiPercent,
+  };
+}
+
+function getPriceMarginClass(roiPercent) {
+  if (!Number.isFinite(roiPercent)) return "";
+  if (roiPercent < 5) return "sf-sp-price-margin-low";
+  if (roiPercent >= 10) return "sf-sp-price-margin-high";
   return "";
 }
 
-function applySupplierPriceState(priceEl, price, thresholds, prefix = "") {
-  priceEl.classList.remove(
-    `${prefix}sp-price-good-deal`,
-    `${prefix}sp-price-expensive`,
-  );
-  const stateClass = getSupplierPriceState(price, thresholds);
-  if (stateClass) {
-    priceEl.classList.add(`${prefix}${stateClass}`);
+function applyPriceMarginState(priceEl, cogs, revenueEstimate) {
+  if (!priceEl) return;
+
+  priceEl.classList.remove("sf-sp-price-margin-low", "sf-sp-price-margin-high");
+  const roiPercent = getRoiPercent(revenueEstimate, cogs);
+  const marginClass = getPriceMarginClass(roiPercent);
+  if (marginClass) {
+    priceEl.classList.add(marginClass);
   }
+}
+
+function applyProfitMetaState(metaEl, cogs, revenueEstimate) {
+  if (!metaEl) return;
+
+  metaEl.classList.remove(
+    "sf-sp-profit-meta-margin-low",
+    "sf-sp-profit-meta-margin-high",
+  );
+  const roiPercent = getRoiPercent(revenueEstimate, cogs);
+  const marginClass = getPriceMarginClass(roiPercent);
+  if (!marginClass) return;
+
+  metaEl.classList.add(marginClass.replace("sp-price", "sp-profit-meta"));
 }
 
 function waitForTable() {
