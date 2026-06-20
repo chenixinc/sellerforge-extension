@@ -289,6 +289,7 @@ function wireSuppliers(shadow, revenueEstimate) {
       const wrapper = document.createElement("div");
       wrapper.innerHTML = supplierItem(response.supplier);
       const el = wrapper.firstElementChild;
+      el.dataset.asin = asin;
       list.prepend(el);
       wireRemoveBtn(el, list, errorEl);
       wireRefreshBtn(el);
@@ -314,6 +315,7 @@ function wireSuppliers(shadow, revenueEstimate) {
   });
 
   list.querySelectorAll(".supplier-item").forEach((el) => {
+    el.dataset.asin = asin;
     wireRemoveBtn(el, list, errorEl);
     wireRefreshBtn(el, revenueEstimate);
     fetchSupplierData(el, false, null, revenueEstimate);
@@ -361,6 +363,7 @@ async function fetchSupplierData(
   revenueEstimate = null,
 ) {
   const url = el.dataset.url;
+  const asin = el.dataset.asin;
   if (!url) return;
   try {
     if (refreshButton) {
@@ -386,14 +389,22 @@ async function fetchSupplierData(
       const cogs = Number(d.price);
       applyPriceMarginState(priceEl, cogs, revenueEstimate);
 
-      const metrics = getProfitMetrics(revenueEstimate, cogs);
-      if (metrics) {
-        const meta = document.createElement("div");
-        meta.className = "sp-profit-meta";
-        applyProfitMetaState(meta, cogs, revenueEstimate);
-        meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
-        container.appendChild(meta);
-      }
+      const priceToRevenueDivider = document.createElement("div");
+      priceToRevenueDivider.className = "sp-section-divider";
+      container.appendChild(priceToRevenueDivider);
+
+      const listingPrice = Number(revenueEstimate?.listing_price);
+      const inputRow = createListingPriceInputRow(
+        asin,
+        listingPrice,
+        async (nextRevenueEstimate) => {
+          applyPriceMarginState(priceEl, cogs, nextRevenueEstimate);
+          updateProfitDetails(container, cogs, nextRevenueEstimate);
+        },
+      );
+      container.appendChild(inputRow);
+
+      updateProfitDetails(container, cogs, revenueEstimate);
     }
 
     if (d.stock || d.stock_eta) {
@@ -411,6 +422,11 @@ async function fetchSupplierData(
             "beforeend",
             `<span class="sp-stock-item ${cls}">${escapeHtml(s.location || "Unknown")}: <strong>${escapeHtml(qtyOrEta)}</strong>${eta}</span>`,
           );
+        }
+        if (d.price && stockDiv.childElementCount > 0) {
+          const revenueToStockDivider = document.createElement("div");
+          revenueToStockDivider.className = "sp-section-divider";
+          container.appendChild(revenueToStockDivider);
         }
         container.appendChild(stockDiv);
       } catch {
@@ -443,6 +459,149 @@ async function fetchSupplierData(
       refreshButton.disabled = false;
     }
   }
+}
+
+function createListingPriceInputRow(asin, listingPrice, onUpdatedEstimate) {
+  const row = document.createElement("div");
+  row.className = "sp-listing-price-row";
+
+  const label = document.createElement("span");
+  label.className = "sp-listing-price-label";
+  label.textContent = "List:";
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "sp-listing-price-input";
+  input.step = "0.01";
+  input.min = "0.01";
+  if (Number.isFinite(listingPrice) && listingPrice > 0) {
+    input.value = formatPrice(listingPrice);
+  }
+
+  const submitOverride = async () => {
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value <= 0 || !asin) return;
+
+    input.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: MSG.GET_REVENUE_ESTIMATE,
+        asin,
+        listingPrice: value,
+        refresh: true,
+      });
+      if (!response?.ok || !response.data) return;
+
+      input.value = formatPrice(Number(response.data.listing_price) || value);
+      onUpdatedEstimate(response.data);
+    } finally {
+      input.disabled = false;
+    }
+  };
+
+  input.addEventListener("change", submitOverride);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitOverride();
+    }
+  });
+
+  row.appendChild(label);
+  row.appendChild(input);
+  return row;
+}
+
+function updateProfitDetails(container, cogs, revenueEstimate) {
+  const existingMeta = container.querySelector(".sp-profit-meta");
+  const existingBreakdown = container.querySelector(".sp-fee-breakdown");
+  existingMeta?.remove();
+  existingBreakdown?.remove();
+
+  // Insert before the stock section: find the stock div and its preceding
+  // divider so re-renders after listing-price changes land in the right place.
+  const stockEl = container.querySelector(".sp-stock");
+  const beforeDivider = stockEl?.previousElementSibling?.classList.contains(
+    "sp-section-divider",
+  )
+    ? stockEl.previousElementSibling
+    : null;
+  const anchor = beforeDivider || stockEl || null;
+  const insert = (node) =>
+    anchor ? container.insertBefore(node, anchor) : container.appendChild(node);
+
+  const feeRows = getFeeBreakdownRows(revenueEstimate);
+  if (feeRows.length) {
+    const breakdown = document.createElement("div");
+    breakdown.className = "sp-fee-breakdown";
+
+    const table = document.createElement("table");
+    table.className = "sp-fee-table";
+    const tbody = document.createElement("tbody");
+
+    for (const row of feeRows) {
+      const tr = document.createElement("tr");
+
+      const labelTd = document.createElement("td");
+      labelTd.className = "sp-fee-label";
+      labelTd.textContent = row.label;
+
+      const amountTd = document.createElement("td");
+      amountTd.className = "sp-fee-value";
+      amountTd.textContent = `$${formatPrice(row.amount)}`;
+
+      tr.appendChild(labelTd);
+      tr.appendChild(amountTd);
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    breakdown.appendChild(table);
+    insert(breakdown);
+  }
+
+  const metrics = getProfitMetrics(revenueEstimate, cogs);
+  if (!metrics) return;
+
+  const meta = document.createElement("div");
+  meta.className = "sp-profit-meta";
+  applyProfitMetaState(meta, cogs, revenueEstimate);
+  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
+  insert(meta);
+}
+
+function getFeeBreakdownRows(revenueEstimate) {
+  if (!revenueEstimate) return [];
+
+  const rows = [];
+  const breakdown = revenueEstimate.fee_breakdown || {};
+  const feeAliases = {
+    ReferralFee: "Referral fee",
+    VariableClosingFee: "Variable closing fee",
+    PerItemFee: "Per item fee",
+    FBAFees: "FBA fees",
+  };
+
+  for (const [name, value] of Object.entries(breakdown)) {
+    const amount = Number(value?.amount);
+    const alwaysShow = name === "ReferralFee" || name === "FBAFees";
+    if (!Number.isFinite(amount) || (amount <= 0 && !alwaysShow)) continue;
+    rows.push({ label: feeAliases[name] || name, amount });
+  }
+
+  const totalFees = Number(revenueEstimate?.total_fees?.amount);
+  if (Number.isFinite(totalFees) && totalFees > 0) {
+    rows.push({ label: "Total fees", amount: totalFees });
+  }
+
+  const revenueBeforeCogs = Number(
+    revenueEstimate?.estimated_revenue_before_cogs?.amount,
+  );
+  if (Number.isFinite(revenueBeforeCogs)) {
+    rows.push({ label: "Revenue", amount: revenueBeforeCogs });
+  }
+
+  return rows;
 }
 
 function getRoiPercent(revenueEstimate, cogs) {

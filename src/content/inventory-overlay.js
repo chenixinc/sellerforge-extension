@@ -170,6 +170,7 @@ async function loadProductAndSuppliers(row, productCell, priceCell, asin) {
       suppliersDiv.className = "sf-supplier-list";
       for (const supplier of res.suppliers) {
         const el = renderSupplierItem(supplier, res.revenueEstimate || null);
+        el.dataset.asin = asin;
         suppliersDiv.appendChild(el);
         fetchSupplierData(
           el,
@@ -246,6 +247,7 @@ async function fetchSupplierData(
   refreshButton = null,
   revenueEstimate = null,
 ) {
+  const asin = el.dataset.asin;
   if (!url) return;
   try {
     if (refreshButton) {
@@ -273,14 +275,22 @@ async function fetchSupplierData(
       applyPriceMarginState(priceEl, cogs, revenueEstimate);
       info.appendChild(priceEl);
 
-      const metrics = getProfitMetrics(revenueEstimate, cogs);
-      if (metrics) {
-        const meta = document.createElement("div");
-        meta.className = "sf-sp-profit-meta";
-        applyProfitMetaState(meta, cogs, revenueEstimate);
-        meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
-        info.appendChild(meta);
-      }
+      const priceToRevenueDivider = document.createElement("div");
+      priceToRevenueDivider.className = "sf-sp-section-divider";
+      info.appendChild(priceToRevenueDivider);
+
+      const listingPrice = Number(revenueEstimate?.listing_price);
+      const inputRow = createListingPriceInputRow(
+        asin,
+        listingPrice,
+        async (nextRevenueEstimate) => {
+          applyPriceMarginState(priceEl, cogs, nextRevenueEstimate);
+          updateProfitDetails(info, cogs, nextRevenueEstimate, "sf-");
+        },
+      );
+      info.appendChild(inputRow);
+
+      updateProfitDetails(info, cogs, revenueEstimate, "sf-");
 
       priceEl.addEventListener("click", (e) => {
         e.preventDefault();
@@ -318,6 +328,11 @@ async function fetchSupplierData(
 
           stockDiv.appendChild(stockSpan);
         }
+        if (d.price && stockDiv.childElementCount > 0) {
+          const revenueToStockDivider = document.createElement("div");
+          revenueToStockDivider.className = "sf-sp-section-divider";
+          info.appendChild(revenueToStockDivider);
+        }
         info.appendChild(stockDiv);
       } catch (err) {
         log("Failed to render stock info for", url, err.message);
@@ -336,6 +351,149 @@ async function fetchSupplierData(
       refreshButton.disabled = false;
     }
   }
+}
+
+function createListingPriceInputRow(asin, listingPrice, onUpdatedEstimate) {
+  const row = document.createElement("div");
+  row.className = "sf-sp-listing-price-row";
+
+  const label = document.createElement("span");
+  label.className = "sf-sp-listing-price-label";
+  label.textContent = "List:";
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "sf-sp-listing-price-input";
+  input.step = "0.01";
+  input.min = "0.01";
+  if (Number.isFinite(listingPrice) && listingPrice > 0) {
+    input.value = formatPrice(listingPrice);
+  }
+
+  const submitOverride = async () => {
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value <= 0 || !asin) return;
+
+    input.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: MSG.GET_REVENUE_ESTIMATE,
+        asin,
+        listingPrice: value,
+        refresh: true,
+      });
+      if (!response?.ok || !response.data) return;
+
+      input.value = formatPrice(Number(response.data.listing_price) || value);
+      onUpdatedEstimate(response.data);
+    } finally {
+      input.disabled = false;
+    }
+  };
+
+  input.addEventListener("change", submitOverride);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitOverride();
+    }
+  });
+
+  row.appendChild(label);
+  row.appendChild(input);
+  return row;
+}
+
+function updateProfitDetails(info, cogs, revenueEstimate, prefix = "") {
+  const existingMeta = info.querySelector(`.${prefix}sp-profit-meta`);
+  const existingBreakdown = info.querySelector(`.${prefix}sp-fee-breakdown`);
+  existingMeta?.remove();
+  existingBreakdown?.remove();
+
+  // Insert before the stock section: find the stock div and its preceding
+  // divider so re-renders after listing-price changes land in the right place.
+  const stockEl = info.querySelector(`.${prefix}sp-stock`);
+  const beforeDivider = stockEl?.previousElementSibling?.classList.contains(
+    `${prefix}sp-section-divider`,
+  )
+    ? stockEl.previousElementSibling
+    : null;
+  const anchor = beforeDivider || stockEl || null;
+  const insert = (node) =>
+    anchor ? info.insertBefore(node, anchor) : info.appendChild(node);
+
+  const feeRows = getFeeBreakdownRows(revenueEstimate);
+  if (feeRows.length) {
+    const breakdown = document.createElement("div");
+    breakdown.className = `${prefix}sp-fee-breakdown`;
+
+    const table = document.createElement("table");
+    table.className = `${prefix}sp-fee-table`;
+    const tbody = document.createElement("tbody");
+
+    for (const row of feeRows) {
+      const tr = document.createElement("tr");
+
+      const labelTd = document.createElement("td");
+      labelTd.className = `${prefix}sp-fee-label`;
+      labelTd.textContent = row.label;
+
+      const amountTd = document.createElement("td");
+      amountTd.className = `${prefix}sp-fee-value`;
+      amountTd.textContent = `$${formatPrice(row.amount)}`;
+
+      tr.appendChild(labelTd);
+      tr.appendChild(amountTd);
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    breakdown.appendChild(table);
+    insert(breakdown);
+  }
+
+  const metrics = getProfitMetrics(revenueEstimate, cogs);
+  if (!metrics) return;
+
+  const meta = document.createElement("div");
+  meta.className = `${prefix}sp-profit-meta`;
+  applyProfitMetaState(meta, cogs, revenueEstimate);
+  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
+  insert(meta);
+}
+
+function getFeeBreakdownRows(revenueEstimate) {
+  if (!revenueEstimate) return [];
+
+  const rows = [];
+  const breakdown = revenueEstimate.fee_breakdown || {};
+  const feeAliases = {
+    ReferralFee: "Referral fee",
+    VariableClosingFee: "Variable closing fee",
+    PerItemFee: "Per item fee",
+    FBAFees: "FBA fees",
+  };
+
+  for (const [name, value] of Object.entries(breakdown)) {
+    const amount = Number(value?.amount);
+    const alwaysShow = name === "ReferralFee" || name === "FBAFees";
+    if (!Number.isFinite(amount) || (amount <= 0 && !alwaysShow)) continue;
+    rows.push({ label: feeAliases[name] || name, amount });
+  }
+
+  const totalFees = Number(revenueEstimate?.total_fees?.amount);
+  if (Number.isFinite(totalFees) && totalFees > 0) {
+    rows.push({ label: "Total fees", amount: totalFees });
+  }
+
+  const revenueBeforeCogs = Number(
+    revenueEstimate?.estimated_revenue_before_cogs?.amount,
+  );
+  if (Number.isFinite(revenueBeforeCogs)) {
+    rows.push({ label: "Revenue", amount: revenueBeforeCogs });
+  }
+
+  return rows;
 }
 
 function getRoiPercent(revenueEstimate, cogs) {
@@ -475,7 +633,6 @@ function injectStyles() {
     ${supplierCSS("sf-")}
     ${supplierActionCSS("sf-")}
     .sf-supplier-item { border: 1px solid ${c.borderLight}; background: #f8f8f8; }
-    .sf-supplier-item:hover { background: #f0f0f0; }
   `;
   document.head.appendChild(style);
 }

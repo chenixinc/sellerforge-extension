@@ -176,10 +176,23 @@ async function getAsinData(asin) {
 }
 
 async function getRevenueEstimate(asin) {
+  return getRevenueEstimateForPrice(asin);
+}
+
+async function getRevenueEstimateForPrice(
+  asin,
+  { listingPrice = null, refresh = false, domain = null } = {},
+) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/calculate-revenue/${encodeURIComponent(asin)}`,
-    );
+    const params = new URLSearchParams();
+    if (domain) params.set("domain", domain);
+    if (listingPrice != null) params.set("listing_price", String(listingPrice));
+    if (refresh) params.set("refresh", "true");
+
+    const query = params.toString();
+    const url = `${API_BASE}/api/calculate-revenue/${encodeURIComponent(asin)}${query ? `?${query}` : ""}`;
+
+    const res = await fetch(url);
     if (!res.ok) {
       return null;
     }
@@ -290,6 +303,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, product, suppliers, revenueEstimate }),
         )
         .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case MSG.GET_REVENUE_ESTIMATE:
+      handleGetRevenueEstimate(message, sendResponse);
       return true;
 
     case MSG.ADD_SUPPLIER:
@@ -408,6 +425,31 @@ async function handleParseSupplier(url, refresh = false, sendResponse) {
     sendResponse({ ok: true, data });
   } catch {
     sendResponse({ ok: true, data: null });
+  }
+}
+
+async function handleGetRevenueEstimate(message, sendResponse) {
+  try {
+    if (!message?.asin) {
+      sendResponse({ ok: false, error: "asin is required" });
+      return;
+    }
+
+    const data = await getRevenueEstimateForPrice(message.asin, {
+      listingPrice:
+        message.listingPrice == null ? null : Number(message.listingPrice),
+      refresh: Boolean(message.refresh),
+      domain: message.domain || null,
+    });
+
+    if (!data) {
+      sendResponse({ ok: false, error: "Failed to fetch revenue estimate" });
+      return;
+    }
+
+    sendResponse({ ok: true, data });
+  } catch (err) {
+    sendResponse({ ok: false, error: err.message });
   }
 }
 

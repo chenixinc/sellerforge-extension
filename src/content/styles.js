@@ -44,7 +44,6 @@ export function supplierCSS(p = "") {
   const c = COLORS;
   return `
     ${s(p, "supplier-item")} { display: flex; flex-direction: column; padding: 6px 8px 8px; border-radius: 6px; min-width: 0; overflow: hidden; }
-    ${s(p, "supplier-item")}:hover { background: ${c.hover}; }
     ${s(p, "supplier-row")} { display: flex; align-items: center; gap: 8px; text-decoration: none; color: inherit; overflow: hidden; }
     ${s(p, "supplier-icon")} { width: 16px; height: 16px; flex-shrink: 0; object-fit: contain; }
     ${s(p, "supplier-icon-placeholder")} { width: 16px; height: 16px; flex-shrink: 0; font-size: 14px; line-height: 16px; text-align: center; }
@@ -60,9 +59,20 @@ export function supplierCSS(p = "") {
     ${s(p, "sp-price")}:hover { text-decoration: underline; }
     ${s(p, "sp-price")}::after { content: '✓'; margin-left: 4px; color: ${c.success}; font-size: 1em; visibility: hidden; opacity: 0; }
     ${s(p, "sp-price")}.${p}copied::after { visibility: visible; opacity: 1; }
+    ${s(p, "sp-listing-price-row")} { display: flex; align-items: center; gap: 6px; }
+    ${s(p, "sp-listing-price-label")} { font-size: 0.95em; color: ${c.muted}; white-space: nowrap; }
+    ${s(p, "sp-listing-price-input")} { width: 84px; min-width: 0; padding: 2px 6px; border: 1px solid ${c.border}; border-radius: 4px; font: inherit; font-size: 0.95em; line-height: 1.2; }
+    ${s(p, "sp-listing-price-input")}:focus { outline: none; border-color: ${c.primary}; }
+    ${s(p, "sp-listing-price-input")}:disabled { background: ${c.hover}; color: ${c.mutedLight}; }
+    ${s(p, "sp-section-divider")} { width: 130px; border-top: 1px solid #eaeaea; margin: 2px 0; }
     ${s(p, "sp-profit-meta")} { font-size: 0.95em; color: ${c.muted}; line-height: 1.2; }
     ${s(p, "sp-profit-meta")}.${p}sp-profit-meta-margin-low strong { color: ${c.error}; }
     ${s(p, "sp-profit-meta")}.${p}sp-profit-meta-margin-high strong { color: ${c.success}; }
+    ${s(p, "sp-fee-breakdown")} { font-size: 0.95em; color: ${c.muted}; line-height: 1.2; white-space: normal; }
+    ${s(p, "sp-fee-table")} { border-collapse: collapse; width: auto; }
+    ${s(p, "sp-fee-table")} td { padding: 0; }
+    ${s(p, "sp-fee-label")} { padding-right: 10px !important; white-space: nowrap; }
+    ${s(p, "sp-fee-value")} { text-align: right; white-space: nowrap; }
     ${s(p, "sp-stock")} { display: flex; flex-direction: column; }
     ${s(p, "sp-stock-item")} { color: ${c.text}; line-height: 1.2em; }
     ${s(p, "sp-stock-item")}.${p}in-stock { color: ${c.text}; }
