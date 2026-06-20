@@ -56,7 +56,10 @@ function showProduct(product, suppliers, productDetails, revenueEstimate) {
     <button type="button" class="close-btn" title="Close">&times;</button>
     <div class="header">
       ${product.image ? `<img class="thumb" src="${escapeAttr(product.image)}" alt="" />` : ""}
-      <strong>${escapeHtml(product.title || "No title")}</strong>
+      <div class="header-title">
+        <strong>${escapeHtml(product.title || "No title")}</strong>
+        <a class="amz-link" href="https://www.amazon.ca/dp/${escapeAttr(product.asin)}" target="_blank" rel="noopener" title="View on Amazon"><img src="https://www.amazon.ca/favicon.ico" width="14" height="14" alt="Amazon" /></a>
+      </div>
     </div>
     <table class="product-table">
       ${row("ASIN", product.asin)}
@@ -383,11 +386,42 @@ async function fetchSupplierData(
     container.className = "supplier-parsed";
 
     if (d.price) {
-      const priceHtml = `<span class="sp-price" title="Click to copy">${escapeHtml(`$${formatPrice(d.price)}`)}</span>`;
-      container.insertAdjacentHTML("beforeend", priceHtml);
-      const priceEl = container.querySelector(".sp-price");
       const cogs = Number(d.price);
+
+      const priceRow = document.createElement("div");
+      priceRow.className = "sp-price-row";
+
+      const priceEl = document.createElement("span");
+      priceEl.className = "sp-price";
+      priceEl.title = "Click to copy";
+      priceEl.textContent = `$${formatPrice(cogs)}`;
       applyPriceMarginState(priceEl, cogs, revenueEstimate);
+      priceRow.appendChild(priceEl);
+
+      const qtyLabel = document.createElement("span");
+      qtyLabel.className = "sp-qty-label";
+      qtyLabel.textContent = "Qty:";
+      priceRow.appendChild(qtyLabel);
+
+      const qtyInput = document.createElement("input");
+      qtyInput.type = "number";
+      qtyInput.className = "sp-qty-input";
+      qtyInput.value = "1";
+      qtyInput.min = "1";
+      qtyInput.step = "1";
+      priceRow.appendChild(qtyInput);
+
+      container.appendChild(priceRow);
+
+      const getQty = () => Math.max(1, Math.floor(Number(qtyInput.value)) || 1);
+      let activeRevenueEstimate = revenueEstimate;
+
+      qtyInput.addEventListener("change", () => {
+        const qty = getQty();
+        qtyInput.value = qty;
+        priceEl.textContent = `$${formatPrice(cogs * qty)}`;
+        updateProfitDetails(container, cogs, activeRevenueEstimate, qty);
+      });
 
       const priceToRevenueDivider = document.createElement("div");
       priceToRevenueDivider.className = "sp-section-divider";
@@ -398,13 +432,14 @@ async function fetchSupplierData(
         asin,
         listingPrice,
         async (nextRevenueEstimate) => {
+          activeRevenueEstimate = nextRevenueEstimate;
           applyPriceMarginState(priceEl, cogs, nextRevenueEstimate);
-          updateProfitDetails(container, cogs, nextRevenueEstimate);
+          updateProfitDetails(container, cogs, nextRevenueEstimate, getQty());
         },
       );
       container.appendChild(inputRow);
 
-      updateProfitDetails(container, cogs, revenueEstimate);
+      updateProfitDetails(container, cogs, revenueEstimate, 1);
     }
 
     if (d.stock || d.stock_eta) {
@@ -512,7 +547,7 @@ function createListingPriceInputRow(asin, listingPrice, onUpdatedEstimate) {
   return row;
 }
 
-function updateProfitDetails(container, cogs, revenueEstimate) {
+function updateProfitDetails(container, cogs, revenueEstimate, qty = 1) {
   const existingMeta = container.querySelector(".sp-profit-meta");
   const existingBreakdown = container.querySelector(".sp-fee-breakdown");
   existingMeta?.remove();
@@ -548,7 +583,7 @@ function updateProfitDetails(container, cogs, revenueEstimate) {
 
       const amountTd = document.createElement("td");
       amountTd.className = "sp-fee-value";
-      amountTd.textContent = `$${formatPrice(row.amount)}`;
+      amountTd.textContent = `$${formatPrice(row.amount * qty)}`;
 
       tr.appendChild(labelTd);
       tr.appendChild(amountTd);
@@ -566,7 +601,7 @@ function updateProfitDetails(container, cogs, revenueEstimate) {
   const meta = document.createElement("div");
   meta.className = "sp-profit-meta";
   applyProfitMetaState(meta, cogs, revenueEstimate);
-  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
+  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit * qty)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
   insert(meta);
 }
 
@@ -680,6 +715,10 @@ function getStyles() {
     .close-btn { position: absolute; top: 6px; right: 10px; background: none; border: none; font-size: 1.4em; cursor: pointer; color: ${c.muted}; }
     .close-btn:hover { color: #000; }
     .header { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; padding-right: 24px; line-height: 1.4; }
+    .header-title { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
+    .header-title strong { flex: 1; min-width: 0; }
+    .amz-link { display: inline-flex; align-items: center; flex-shrink: 0; margin-top: 2px; opacity: 0.55; }
+    .amz-link:hover { opacity: 1; }
     .thumb { width: 80px; height: 80px; flex-shrink: 0; object-fit: contain; border-radius: 6px; border: 1px solid ${c.borderLight}; background: #fafafa; }
     ${productTableCSS()}
     .product-table th { font-size: 0.9em; color: ${c.mutedLight}; padding: 5px 8px; }

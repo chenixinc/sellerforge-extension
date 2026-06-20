@@ -270,10 +270,38 @@ async function fetchSupplierData(
       const priceEl = document.createElement("span");
       priceEl.className = "sf-sp-price";
       priceEl.title = "Click to copy";
-      priceEl.textContent = `$${formatPrice(d.price)}`;
       const cogs = Number(d.price);
+      priceEl.textContent = `$${formatPrice(cogs)}`;
       applyPriceMarginState(priceEl, cogs, revenueEstimate);
-      info.appendChild(priceEl);
+
+      const priceRow = document.createElement("div");
+      priceRow.className = "sf-sp-price-row";
+      priceRow.appendChild(priceEl);
+
+      const qtyLabel = document.createElement("span");
+      qtyLabel.className = "sf-sp-qty-label";
+      qtyLabel.textContent = "Qty:";
+      priceRow.appendChild(qtyLabel);
+
+      const qtyInput = document.createElement("input");
+      qtyInput.type = "number";
+      qtyInput.className = "sf-sp-qty-input";
+      qtyInput.value = "1";
+      qtyInput.min = "1";
+      qtyInput.step = "1";
+      priceRow.appendChild(qtyInput);
+
+      info.appendChild(priceRow);
+
+      const getQty = () => Math.max(1, Math.floor(Number(qtyInput.value)) || 1);
+      let activeRevenueEstimate = revenueEstimate;
+
+      qtyInput.addEventListener("change", () => {
+        const qty = getQty();
+        qtyInput.value = qty;
+        priceEl.textContent = `$${formatPrice(cogs * qty)}`;
+        updateProfitDetails(info, cogs, activeRevenueEstimate, "sf-", qty);
+      });
 
       const priceToRevenueDivider = document.createElement("div");
       priceToRevenueDivider.className = "sf-sp-section-divider";
@@ -284,13 +312,14 @@ async function fetchSupplierData(
         asin,
         listingPrice,
         async (nextRevenueEstimate) => {
+          activeRevenueEstimate = nextRevenueEstimate;
           applyPriceMarginState(priceEl, cogs, nextRevenueEstimate);
-          updateProfitDetails(info, cogs, nextRevenueEstimate, "sf-");
+          updateProfitDetails(info, cogs, nextRevenueEstimate, "sf-", getQty());
         },
       );
       info.appendChild(inputRow);
 
-      updateProfitDetails(info, cogs, revenueEstimate, "sf-");
+      updateProfitDetails(info, cogs, revenueEstimate, "sf-", 1);
 
       priceEl.addEventListener("click", (e) => {
         e.preventDefault();
@@ -404,7 +433,13 @@ function createListingPriceInputRow(asin, listingPrice, onUpdatedEstimate) {
   return row;
 }
 
-function updateProfitDetails(info, cogs, revenueEstimate, prefix = "") {
+function updateProfitDetails(
+  info,
+  cogs,
+  revenueEstimate,
+  prefix = "",
+  qty = 1,
+) {
   const existingMeta = info.querySelector(`.${prefix}sp-profit-meta`);
   const existingBreakdown = info.querySelector(`.${prefix}sp-fee-breakdown`);
   existingMeta?.remove();
@@ -440,7 +475,7 @@ function updateProfitDetails(info, cogs, revenueEstimate, prefix = "") {
 
       const amountTd = document.createElement("td");
       amountTd.className = `${prefix}sp-fee-value`;
-      amountTd.textContent = `$${formatPrice(row.amount)}`;
+      amountTd.textContent = `$${formatPrice(row.amount * qty)}`;
 
       tr.appendChild(labelTd);
       tr.appendChild(amountTd);
@@ -458,7 +493,7 @@ function updateProfitDetails(info, cogs, revenueEstimate, prefix = "") {
   const meta = document.createElement("div");
   meta.className = `${prefix}sp-profit-meta`;
   applyProfitMetaState(meta, cogs, revenueEstimate);
-  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
+  meta.innerHTML = `Net: <strong>$${formatPrice(metrics.netProfit * qty)}</strong> (ROI <strong>${formatPrice(metrics.roiPercent)}%</strong>)`;
   insert(meta);
 }
 

@@ -53,6 +53,10 @@ export function supplierCSS(p = "") {
     ${s(p, "supplier-remove")}:hover { color: ${c.error}; }
     ${s(p, "supplier-parsed")} { margin-top: 4px; gap: 4px; font-size: 0.9em; color: ${c.text}; display: flex; flex-direction: column; gap: 4px; padding-left: 24px; }
     ${s(p, "supplier-parsed-loading")} { font-size: 0.9em; color: #999; }
+    ${s(p, "sp-price-row")} { display: flex; align-items: center; gap: 6px; }
+    ${s(p, "sp-qty-label")} { font-size: 0.95em; color: ${c.muted}; white-space: nowrap; margin-left: auto; }
+    ${s(p, "sp-qty-input")} { width: 50px; padding: 2px 4px; border: 1px solid ${c.border}; border-radius: 4px; font: inherit; font-size: 0.95em; text-align: center; }
+    ${s(p, "sp-qty-input")}:focus { outline: none; border-color: ${c.primary}; }
     ${s(p, "sp-price")} { font-weight: 700; font-size: 1.3em; cursor: pointer; white-space: nowrap; position: relative; }
     ${s(p, "sp-price")}.${p}sp-price-margin-low { color: ${c.error}; }
     ${s(p, "sp-price")}.${p}sp-price-margin-high { color: ${c.success}; }
